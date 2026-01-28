@@ -1,6 +1,6 @@
 # nn - New Note 📝
 
-A fast, opinionated note-taking CLI for engineers. Daily journals, incident docs, meeting notes — all from your terminal.
+A fast, opinionated note-taking CLI. Daily journals, incident docs, meeting notes — all from your terminal.
 
 ```bash
 nn                          # Open today's journal
