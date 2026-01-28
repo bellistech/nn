@@ -1,0 +1,247 @@
+.\" nn - New Note manual page
+.\" Generate with: groff -man -Tascii nn.1 | less
+.\" Install with: sudo cp nn.1 /usr/share/man/man1/
+.\"
+.TH NN 1 "January 2026" "nn 4.0.0" "User Commands"
+.SH NAME
+nn \- fast note-taking CLI for engineers
+.SH SYNOPSIS
+.B nn
+[\fIOPTIONS\fR] [\fINAME\fR]
+.br
+.B nn
+\fB\-T\fR \fITEMPLATE\fR [\fINAME\fR]
+.br
+.B nn
+\fB\-a\fR "\fITEXT\fR"
+.br
+\fICOMMAND\fR | \fBnn \-i\fR [\fINAME\fR]
+.SH DESCRIPTION
+.B nn
+(New Note) is a fast, opinionated note-taking tool designed for engineers.
+It creates markdown notes organized by date in a hierarchical folder structure.
+.PP
+Notes are stored in \fI~/journal/YYYY/MM/DD/\fR by default.
+All notes include YAML frontmatter with metadata.
+.SH OPTIONS
+.SS "Creating Notes"
+.TP
+.B nn
+Create or open today's journal.
+.TP
+.BI nn " NAME"
+Create a named note in today's folder.
+.TP
+.BI \-T " TEMPLATE" "\fR [\fINAME\fR]"
+.TQ
+.BI \-\-template " TEMPLATE" "\fR [\fINAME\fR]"
+Create note from template. See \fBTEMPLATES\fR section.
+.TP
+.BI \-a " TEXT"
+.TQ
+.BI \-\-append " TEXT"
+Quick append to today's journal without opening editor.
+.TP
+.BI \-i " \fR[\fINAME\fR]"
+.TQ
+.BI \-\-stdin " \fR[\fINAME\fR]"
+Pipe stdin to a note. Useful for capturing command output.
+.SS "Navigation"
+.TP
+.BR \-y ", " \-\-yesterday
+Open yesterday's journal.
+.TP
+.BR \-Y ", " \-\-tomorrow
+Open tomorrow's journal (for prep notes).
+.TP
+.BI + N
+.TQ
+.BI \- N
+Jump N days forward or back. E.g., \fBnn \-3\fR opens 3 days ago.
+.SS "Browse & Search"
+.TP
+.BR \-l ", " \-\-list
+List today's notes.
+.TP
+.BI \-r " \fR[\fIN\fR]"
+.TQ
+.BI \-\-recent " \fR[\fIN\fR]"
+List N most recent notes (default: 10).
+.TP
+.BR \-o ", " \-\-open
+Fuzzy find and open notes with fzf.
+.TP
+.BI \-s " TERM"
+.TQ
+.BI \-\-search " TERM"
+Search note contents with grep or ripgrep.
+.TP
+.BI \-f " PATTERN"
+.TQ
+.BI \-\-find " PATTERN"
+Find notes by filename pattern.
+.TP
+.BR \-t ", " \-\-tree
+Show directory tree of notes.
+.TP
+.B \-\-latest
+Open most recently modified note.
+.SS "Git Sync"
+.TP
+.B \-\-sync
+Git add, commit, and push all changes.
+.TP
+.B \-\-git\-init
+Initialize git repository in notes directory.
+.SS "Utility"
+.TP
+.BR \-p ", " \-\-path
+Print today's notes directory path.
+.TP
+.BI \-e " \fR[\fINAME\fR]"
+.TQ
+.BI \-\-view " \fR[\fINAME\fR]"
+Open note in pager (read-only).
+.TP
+.BR \-m ", " \-\-markdown
+Display markdown syntax cheat sheet.
+.TP
+.B \-\-stats
+Show note statistics and streak count.
+.TP
+.B \-\-completions
+Output shell completions for bash and zsh.
+.TP
+.BR \-h ", " \-\-h ", " \-help ", " \-\-help ", " \-? ", " \-\-?
+Show help message.
+.TP
+.BR \-v ", " \-\-version
+Show version number.
+.SH TEMPLATES
+Templates are pre-filled note formats. Use with \fB\-T\fR option.
+.TP
+.B journal
+Daily journal with sections for mood, wins, blockers, and tomorrow's focus.
+.TP
+.B incident
+Incident response: timeline, impact, status, mitigation steps.
+.TP
+.B postmortem
+Post-incident review: 5 whys, action items, lessons learned.
+.TP
+.B oncall
+On-call handoff: open issues, alerts fired, things to watch.
+.TP
+.B runbook
+Operational runbook: prerequisites, steps, rollback, escalation.
+.TP
+.B standup
+Daily standup: yesterday, today, blockers.
+.TP
+.B 1on1
+One-on-one meeting notes.
+.TP
+.B meeting
+General meeting: agenda, notes, decisions, action items.
+.TP
+.B retro
+Sprint retrospective: went well, improve, action items.
+.SH ENVIRONMENT
+.TP
+.B NOTES_ROOT
+Base directory for notes. Default: \fI$HOME/journal\fR
+.TP
+.B EDITOR
+Editor to use. Default: \fIvim\fR
+.TP
+.B PAGER
+Pager for read-only view. Default: \fIless\fR
+.SH FILES
+.TP
+.I ~/journal/
+Default notes directory.
+.TP
+.I ~/journal/YYYY/MM/DD/
+Date-organized subdirectories.
+.TP
+.I ~/journal/.latest
+Symlink to most recently modified note.
+.TP
+.I ~/journal/.git/
+Git repository (after \fB\-\-git\-init\fR).
+.SH EXAMPLES
+.PP
+Create today's journal:
+.RS
+.nf
+$ nn
+.fi
+.RE
+.PP
+Quick append without opening editor:
+.RS
+.nf
+$ nn -a "deployed v2.3.1 to production"
+.fi
+.RE
+.PP
+Create incident doc:
+.RS
+.nf
+$ nn -T incident database-outage
+.fi
+.RE
+.PP
+Capture command output:
+.RS
+.nf
+$ kubectl describe pod foo | nn -i pod-debug
+.fi
+.RE
+.PP
+Navigate to yesterday:
+.RS
+.nf
+$ nn -y
+.fi
+.RE
+.PP
+Jump 3 days back:
+.RS
+.nf
+$ nn -3
+.fi
+.RE
+.PP
+Search all notes:
+.RS
+.nf
+$ nn -s "kubernetes"
+.fi
+.RE
+.PP
+Git sync:
+.RS
+.nf
+$ nn --sync
+.fi
+.RE
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+Error (missing argument, file not found, etc.).
+.SH SEE ALSO
+.BR vim (1),
+.BR less (1),
+.BR fzf (1),
+.BR rg (1),
+.BR git (1)
+.SH BUGS
+Report bugs at: https://github.com/bellistech/nn/issues
+.SH AUTHOR
+Written by bellistech.
+.SH COPYRIGHT
+MIT License. See LICENSE file for details.

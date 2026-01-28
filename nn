@@ -1,0 +1,1303 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# nn - New Note v4.0
+# Fast note-taking for SRE/Platform engineers
+# Squaresoft-level polish. Would this be worthy of a FF menu?
+
+readonly VERSION="4.0.0"
+readonly NOTES_ROOT="${NOTES_ROOT:-$HOME/journal}"
+readonly EDITOR="${EDITOR:-vim}"
+
+# Colors
+readonly RESET='\033[0m'
+readonly BOLD='\033[1m'
+readonly DIM='\033[2m'
+readonly RED='\033[0;31m'
+readonly GREEN='\033[0;32m'
+readonly YELLOW='\033[0;33m'
+readonly BLUE='\033[0;34m'
+readonly MAGENTA='\033[0;35m'
+readonly CYAN='\033[0;36m'
+
+# Date components (computed once at startup)
+readonly YEAR=$(date '+%Y')
+readonly MONTH=$(date '+%m')
+readonly DAY=$(date '+%d')
+readonly DATE_FULL=$(date '+%Y-%m-%d')
+readonly TIME_FULL=$(date '+%H:%M %Z')
+readonly TIMESTAMP=$(date '+%H%M%S')
+
+# Today's directory
+readonly TODAY_DIR="${NOTES_ROOT}/${YEAR}/${MONTH}/${DAY}"
+readonly LATEST_LINK="${NOTES_ROOT}/.latest"
+
+# ============================================================================
+# UTILITY FUNCTIONS
+# ============================================================================
+
+# Print colored status messages
+print_ok()     { echo -e "  ${GREEN}✓${RESET} $1"; }
+print_err()    { echo -e "  ${RED}✗${RESET} $1"; }
+print_warn()   { echo -e "  ${YELLOW}!${RESET} $1"; }
+print_info()   { echo -e "  ${BLUE}→${RESET} $1"; }
+
+# Sanitize filename: lowercase, spaces to hyphens, remove special chars
+sanitize_name() {
+    echo "$1" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | sed 's/[^a-z0-9_-]//g'
+}
+
+# Ensure directory exists
+ensure_dir() {
+    [[ -d "$1" ]] || mkdir -p "$1"
+}
+
+# Cross-platform date arithmetic
+# Usage: date_add_days "2026-01-28" -1  => "2026-01-27"
+date_add_days() {
+    local base_date="$1"
+    local days="$2"
+    
+    if date --version &>/dev/null 2>&1; then
+        # GNU date
+        date -d "${base_date} ${days} days" '+%Y-%m-%d'
+    else
+        # BSD date (macOS)
+        if [[ $days -lt 0 ]]; then
+            local abs_days=${days#-}
+            date -j -v-${abs_days}d -f '%Y-%m-%d' "${base_date}" '+%Y-%m-%d' 2>/dev/null
+        else
+            date -j -v+${days}d -f '%Y-%m-%d' "${base_date}" '+%Y-%m-%d' 2>/dev/null
+        fi
+    fi
+}
+
+# Get directory for a specific date
+get_date_dir() {
+    local target_date="$1"
+    local y m d
+    y=$(echo "$target_date" | cut -d- -f1)
+    m=$(echo "$target_date" | cut -d- -f2)
+    d=$(echo "$target_date" | cut -d- -f3)
+    echo "${NOTES_ROOT}/${y}/${m}/${d}"
+}
+
+# Update latest symlink
+update_latest_symlink() {
+    local latest_note
+    latest_note=$(find "$NOTES_ROOT" -name "*.md" -type f -newer "$LATEST_LINK" 2>/dev/null | head -1 || true)
+    
+    if [[ -z "$latest_note" ]]; then
+        # Find most recent if symlink doesn't exist
+        if command -v stat &>/dev/null; then
+            if stat --version &>/dev/null 2>&1; then
+                # GNU stat
+                latest_note=$(find "$NOTES_ROOT" -name "*.md" -type f -printf "%T@ %p\n" 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
+            else
+                # BSD stat
+                latest_note=$(find "$NOTES_ROOT" -name "*.md" -type f -exec stat -f "%m %N" {} \; 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
+            fi
+        fi
+    fi
+    
+    if [[ -n "$latest_note" && -f "$latest_note" ]]; then
+        ln -sf "$latest_note" "$LATEST_LINK"
+    fi
+}
+
+# ============================================================================
+# YAML FRONTMATTER
+# ============================================================================
+
+generate_frontmatter() {
+    local title="${1:-Untitled}"
+    local template="${2:-default}"
+    local tags="${3:-}"
+    
+    cat << EOF
+---
+title: "${title}"
+date: ${DATE_FULL}
+time: ${TIME_FULL}
+template: ${template}
+tags: [${tags}]
+---
+
+EOF
+}
+
+# ============================================================================
+# MARKDOWN CHEAT SHEET
+# ============================================================================
+
+show_markdown_cheatsheet() {
+    cat << 'EOF'
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                         MARKDOWN CHEAT SHEET                                 │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+HEADINGS
+────────────────────────────────────────
+  # H1          ## H2          ### H3
+  #### H4       ##### H5       ###### H6
+
+EMPHASIS
+────────────────────────────────────────
+  *italic*      _italic_
+  **bold**      __bold__
+  ***both***    ~~strikethrough~~
+  `inline code`
+
+LISTS
+────────────────────────────────────────
+  Unordered:              Ordered:
+  - Item                  1. First
+  - Item                  2. Second
+    - Nested                 1. Sub-item
+
+  Task List:
+  - [ ] Unchecked
+  - [x] Checked
+
+LINKS & IMAGES
+────────────────────────────────────────
+  [Link Text](https://url.com)
+  [Link with title](https://url.com "Title")
+  ![Alt text](image.png)
+  [Reference link][1]
+  [1]: https://url.com
+
+CODE
+────────────────────────────────────────
+  Inline: `code`
+
+  Block:
+  ```language
+  code block
+  ```
+
+  Common languages: bash, go, rust, python, yaml, json, sql
+
+BLOCKQUOTES
+────────────────────────────────────────
+  > Quote
+  > > Nested quote
+
+HORIZONTAL RULE
+────────────────────────────────────────
+  ---   or   ***   or   ___
+
+TABLES
+────────────────────────────────────────
+  | Header 1 | Header 2 | Header 3 |
+  |----------|:--------:|---------:|
+  | Left     | Center   | Right    |
+  | Cell     | Cell     | Cell     |
+
+  Alignment: :--- left | :---: center | ---: right
+
+ESCAPING
+────────────────────────────────────────
+  \*literal asterisks\*
+  \# Not a heading
+
+COLLAPSIBLE (GitHub/GitLab)
+────────────────────────────────────────
+  <details>
+  <summary>Click to expand</summary>
+
+  Hidden content here
+
+  </details>
+
+FOOTNOTES
+────────────────────────────────────────
+  Text with footnote[^1]
+  [^1]: Footnote content
+
+DEFINITION LIST
+────────────────────────────────────────
+  Term
+  : Definition
+
+MATH (if supported)
+────────────────────────────────────────
+  Inline: $E = mc^2$
+  Block:
+  $$
+  \sum_{i=1}^n x_i
+  $$
+
+QUICK TEMPLATES
+────────────────────────────────────────
+  Status badge:    ![Status](https://img.shields.io/badge/status-active-green)
+  Keyboard:        <kbd>Ctrl</kbd>+<kbd>C</kbd>
+  Highlight:       ==highlighted== (some parsers)
+  Superscript:     x^2^ or x<sup>2</sup>
+  Subscript:       H~2~O or H<sub>2</sub>O
+
+EOF
+}
+
+# ============================================================================
+# TEMPLATES
+# ============================================================================
+
+template_default() {
+    local title="${1:-Untitled}"
+    generate_frontmatter "$title" "default"
+    cat << EOF
+# ${title}
+
+_Created: ${DATE_FULL} ${TIME_FULL}_
+
+---
+
+EOF
+}
+
+template_journal() {
+    generate_frontmatter "Journal - ${DATE_FULL}" "journal" "journal, daily"
+    cat << EOF
+# Journal - ${DATE_FULL}
+
+_Created: ${TIME_FULL}_
+
+---
+
+## Energy/Mood
+<!-- 1-10, quick check-in -->
+
+
+## What's on my mind
+
+
+## Today's wins 🎉
+
+
+## Blockers/Frustrations
+
+
+## Tomorrow's focus
+
+
+EOF
+}
+
+template_incident() {
+    local title="${1:-TITLE}"
+    generate_frontmatter "Incident: ${title}" "incident" "incident, sre"
+    cat << EOF
+# 🚨 Incident: ${title}
+
+_Opened: ${DATE_FULL} ${TIME_FULL}_
+_Status: **ACTIVE** | MITIGATED | RESOLVED_
+_Severity: **P1** | P2 | P3 | P4_
+_Commander:_
+
+---
+
+## Summary
+<!-- One-liner: What's broken? Who's affected? -->
+
+
+## Timeline
+| Time | Event |
+|------|-------|
+| ${TIME_FULL} | Incident declared |
+|  |  |
+
+## Impact
+- **Users affected:**
+- **Services degraded:**
+- **Revenue impact:**
+
+## Current Status
+<!-- What's happening RIGHT NOW -->
+
+
+## Mitigation Steps
+- [ ] Step 1
+- [ ] Step 2
+
+## Root Cause (if known)
+
+
+## Action Items (post-incident)
+- [ ] 
+
+---
+_Postmortem scheduled: YES / NO_
+EOF
+}
+
+template_postmortem() {
+    local title="${1:-Incident Title}"
+    generate_frontmatter "Postmortem: ${title}" "postmortem" "postmortem, sre, incident"
+    cat << EOF
+# Postmortem: ${title}
+
+_Date: ${DATE_FULL}_
+_Authors:_
+_Status: DRAFT | REVIEW | FINAL_
+
+---
+
+## Summary
+<!-- What happened, duration, impact - 2-3 sentences -->
+
+
+## Impact
+- **Duration:**
+- **Users affected:**
+- **Revenue impact:**
+- **SLO impact:**
+
+## Timeline
+| Time | Event |
+|------|-------|
+|  |  |
+
+## Root Cause
+<!-- The actual root cause, not symptoms -->
+
+
+## Five Whys
+1. Why? →
+2. Why? →
+3. Why? →
+4. Why? →
+5. Why? →
+
+## What Went Well
+- 
+
+## What Went Wrong
+- 
+
+## Where We Got Lucky
+- 
+
+## Action Items
+| Action | Owner | Priority | Due | Status |
+|--------|-------|----------|-----|--------|
+|  |  | P1/P2/P3 |  | TODO |
+
+## Lessons Learned
+
+
+## Supporting Information
+- Graphs:
+- Logs:
+- Related incidents:
+
+EOF
+}
+
+template_oncall() {
+    generate_frontmatter "On-Call Handoff - ${DATE_FULL}" "oncall" "oncall, sre, handoff"
+    cat << EOF
+# 🔔 On-Call Handoff - ${DATE_FULL}
+
+_Outgoing:_
+_Incoming:_
+
+---
+
+## Shift Summary
+<!-- How was the shift? Quiet/busy/hellfire? -->
+
+
+## Open Issues
+| Issue | Status | Notes |
+|-------|--------|-------|
+|  |  |  |
+
+## Alerts Fired
+| Time | Alert | Action Taken |
+|------|-------|--------------|
+|  |  |  |
+
+## Things to Watch
+<!-- Anything brewing that hasn't exploded yet -->
+- 
+
+## Recurring Annoyances
+<!-- Noisy alerts, known flakes -->
+- 
+
+## Handoff Notes
+<!-- Anything incoming oncall needs to know -->
+
+
+---
+_Escalation path confirmed: YES / NO_
+EOF
+}
+
+template_runbook() {
+    local title="${1:-Procedure Name}"
+    generate_frontmatter "Runbook: ${title}" "runbook" "runbook, sre, operations"
+    cat << EOF
+# Runbook: ${title}
+
+_Last updated: ${DATE_FULL}_
+_Owner:_
+_Review cycle: Quarterly_
+
+---
+
+## Overview
+<!-- What does this runbook do? When to use it? -->
+
+
+## Prerequisites
+- [ ] Access to X
+- [ ] Permissions for Y
+
+## When to Use
+- Triggered by alert:
+- Symptoms:
+
+## Procedure
+
+### Step 1: Verify the issue
+\`\`\`bash
+# Commands to verify
+\`\`\`
+Expected output:
+
+### Step 2: Mitigate
+\`\`\`bash
+# Mitigation commands
+\`\`\`
+
+### Step 3: Verify resolution
+\`\`\`bash
+# Verification commands
+\`\`\`
+
+## Rollback
+<!-- If things go wrong -->
+\`\`\`bash
+# Rollback commands
+\`\`\`
+
+## Escalation
+- Primary:
+- Secondary:
+- Management:
+
+## Related
+- Dashboards:
+- Alerts:
+- Other runbooks:
+
+EOF
+}
+
+template_standup() {
+    generate_frontmatter "Standup - ${DATE_FULL}" "standup" "standup, daily"
+    cat << EOF
+# Standup - ${DATE_FULL}
+
+---
+
+## Yesterday
+- 
+
+## Today
+- 
+
+## Blockers
+- 
+
+EOF
+}
+
+template_1on1() {
+    generate_frontmatter "1:1 - ${DATE_FULL}" "1on1" "1on1, meeting"
+    cat << EOF
+# 1:1 - ${DATE_FULL}
+
+_With:_
+
+---
+
+## Check-in
+<!-- How are they doing? Energy? -->
+
+
+## Their Topics
+- 
+
+## My Topics
+- 
+
+## Action Items
+- [ ] 
+
+## Notes
+
+
+## Follow-up for Next Time
+- 
+
+EOF
+}
+
+template_meeting() {
+    local title="${1:-Title}"
+    generate_frontmatter "Meeting: ${title}" "meeting" "meeting"
+    cat << EOF
+# Meeting: ${title}
+
+_Date: ${DATE_FULL} ${TIME_FULL}_
+_Attendees:_
+
+---
+
+## Agenda
+1. 
+
+## Notes
+
+
+## Decisions Made
+- 
+
+## Action Items
+| Action | Owner | Due |
+|--------|-------|-----|
+|  |  |  |
+
+## Follow-up
+- 
+
+EOF
+}
+
+template_retro() {
+    generate_frontmatter "Retrospective - ${DATE_FULL}" "retro" "retro, sprint"
+    cat << EOF
+# Retrospective - ${DATE_FULL}
+
+_Sprint/Period:_
+_Facilitator:_
+
+---
+
+## What Went Well 🎉
+- 
+
+## What Could Be Improved 🔧
+- 
+
+## Action Items
+| Action | Owner | Due |
+|--------|-------|-----|
+|  |  |  |
+
+## Shoutouts 🙌
+- 
+
+EOF
+}
+
+# ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
+
+# Brief usage (shown on error or unknown args)
+show_brief_usage() {
+    cat << EOF
+Usage: nn [OPTIONS] [NAME]
+
+Quick start:
+  nn                    Open today's journal
+  nn <name>             Create named note
+  nn -a "text"          Quick append
+  nn -T <template>      Use template
+
+Common options:
+  -y, --yesterday       Yesterday's journal
+  -o, --open            Fuzzy find with fzf
+  -s, --search TERM     Search notes
+  --sync                Git commit & push
+
+Run 'nn --help' for full documentation.
+EOF
+}
+
+show_usage() {
+    cat << EOF
+${BOLD}nn${RESET} - New Note v${VERSION}
+
+${BOLD}USAGE${RESET}
+  nn                          Create/open today's journal
+  nn <name>                   Create named note
+  nn -T <template> [name]     Create from template
+  nn -a "text"                Quick append to today's journal
+  nn -i [name]                Pipe stdin to note
+
+${BOLD}NAVIGATION${RESET}
+  nn -y, --yesterday          Open yesterday's journal
+  nn -Y, --tomorrow           Open tomorrow's journal (prep)
+  nn +N / -N                  Jump N days forward/back (e.g., nn -3)
+
+${BOLD}TEMPLATES${RESET}  (-T <template>)
+  journal     Daily journal (default)
+  incident    Incident response
+  postmortem  Post-incident review
+  oncall      On-call handoff
+  runbook     Operational procedure
+  standup     Daily standup
+  1on1        One-on-one meeting
+  meeting     General meeting notes
+  retro       Sprint retrospective
+
+${BOLD}BROWSE & SEARCH${RESET}
+  nn -l, --list               List today's notes
+  nn -r, --recent [n]         Recent notes (default: 10)
+  nn -o, --open               Open note with fzf
+  nn -s, --search <term>      Search content (grep/rg)
+  nn -f, --find <pattern>     Find by filename
+  nn -t, --tree               Tree view
+  nn --latest                 Open most recent note
+
+${BOLD}GIT SYNC${RESET}
+  nn --sync                   Commit and push changes
+  nn --git-init               Initialize git repo in notes dir
+
+${BOLD}UTILITY${RESET}
+  nn -p, --path               Print today's path
+  nn -e, --view [name]        Open in pager (read-only)
+  nn -m, --markdown           Markdown cheat sheet
+  nn --stats                  Show statistics
+  nn --completions            Output shell completions
+  nn -h, --help, -?           Show this help
+  nn -v, --version            Version info
+
+${BOLD}EXAMPLES${RESET}
+  nn                          # journal-${DATE_FULL}.md
+  nn standup                  # standup.md
+  nn -T incident prod-down    # incident-prod-down.md
+  nn -a "fixed nginx bug"     # Append to journal
+  kubectl get pods | nn -i k8s-debug
+  nn -y                       # Yesterday's journal
+  nn -3                       # 3 days ago
+  nn +1                       # Tomorrow (prep notes)
+  nn --sync                   # Git commit & push
+
+${BOLD}ENVIRONMENT${RESET}
+  NOTES_ROOT    Base directory (default: \$HOME/journal)
+  EDITOR        Editor (default: vim)
+
+${BOLD}PATHS${RESET}
+  Root:   ${NOTES_ROOT}
+  Today:  ${TODAY_DIR}
+  Latest: ${LATEST_LINK}
+EOF
+}
+
+# Get template content
+get_template() {
+    local template="$1"
+    local title="${2:-}"
+    
+    case "$template" in
+        journal)    template_journal ;;
+        incident)   template_incident "$title" ;;
+        postmortem) template_postmortem "$title" ;;
+        oncall)     template_oncall ;;
+        runbook)    template_runbook "$title" ;;
+        standup)    template_standup ;;
+        1on1)       template_1on1 ;;
+        meeting)    template_meeting "$title" ;;
+        retro)      template_retro ;;
+        *)          template_default "$title" ;;
+    esac
+}
+
+# Create and open note (with optional target directory override)
+create_note() {
+    local name="$1"
+    local template="${2:-default}"
+    local title="${3:-}"
+    local target_dir="${4:-$TODAY_DIR}"
+    local filepath="${target_dir}/${name}"
+    
+    ensure_dir "$target_dir"
+    
+    # If exists, just open it
+    if [[ -f "$filepath" ]]; then
+        print_info "Opening: ${BOLD}${filepath}${RESET}"
+        $EDITOR "$filepath"
+        update_latest_symlink
+        return
+    fi
+    
+    # Derive title from filename if not provided
+    if [[ -z "$title" ]]; then
+        title="${name%.md}"
+        title="${title//-/ }"
+        # Capitalize first letter of each word (portable)
+        title=$(echo "$title" | awk '{for(i=1;i<=NF;i++) $i=toupper(substr($i,1,1)) substr($i,2)} 1')
+    fi
+    
+    # Create with template
+    get_template "$template" "$title" > "$filepath"
+    
+    print_ok "Created: ${BOLD}${filepath}${RESET}"
+    $EDITOR "$filepath"
+    update_latest_symlink
+}
+
+# Quick append to journal
+quick_append() {
+    local text="$1"
+    local journal="${TODAY_DIR}/journal-${DATE_FULL}.md"
+    
+    ensure_dir "$TODAY_DIR"
+    
+    # Create journal if doesn't exist
+    if [[ ! -f "$journal" ]]; then
+        get_template "journal" > "$journal"
+        print_ok "Created new journal"
+    fi
+    
+    # Append with timestamp
+    printf '\n**%s** %s\n' "$(date '+%H:%M')" "$text" >> "$journal"
+    
+    print_ok "Appended to journal"
+    echo -e "  ${DIM}${text}${RESET}"
+    update_latest_symlink
+}
+
+# Pipe stdin to note
+pipe_to_note() {
+    local name="${1:-capture-${TIMESTAMP}}"
+    name=$(sanitize_name "$name")
+    local filepath="${TODAY_DIR}/${name}.md"
+    
+    ensure_dir "$TODAY_DIR"
+    
+    {
+        generate_frontmatter "$name" "capture" "capture, stdin"
+        printf '# %s\n\n' "$name"
+        printf '_Captured: %s %s_\n\n' "$DATE_FULL" "$TIME_FULL"
+        printf '```\n'
+        cat
+        printf '\n```\n'
+    } > "$filepath"
+    
+    print_ok "Captured to: ${BOLD}${filepath}${RESET}" >&2
+    update_latest_symlink
+}
+
+# Navigate to different day's journal
+navigate_day() {
+    local offset="$1"
+    local target_date
+    target_date=$(date_add_days "$DATE_FULL" "$offset")
+    
+    if [[ -z "$target_date" ]]; then
+        print_err "Could not calculate date"
+        return 1
+    fi
+    
+    local target_dir
+    target_dir=$(get_date_dir "$target_date")
+    local journal_name="journal-${target_date}.md"
+    
+    create_note "$journal_name" "journal" "" "$target_dir"
+}
+
+# List today's notes
+list_today() {
+    if [[ ! -d "$TODAY_DIR" ]]; then
+        echo -e "  ${DIM}No notes yet today${RESET}"
+        return
+    fi
+    
+    echo -e "${BOLD}Today's notes (${DATE_FULL}):${RESET}\n"
+    
+    local count=0
+    while IFS= read -r -d '' file; do
+        local basename
+        basename=$(basename "$file")
+        echo -e "  ${basename}"
+        ((count++))
+    done < <(find "$TODAY_DIR" -maxdepth 1 -name "*.md" -type f -print0 2>/dev/null | sort -z)
+    
+    if [[ $count -eq 0 ]]; then
+        echo -e "  ${DIM}(none)${RESET}"
+    fi
+    echo
+}
+
+# List recent notes
+list_recent() {
+    local count="${1:-10}"
+    echo -e "${BOLD}Recent ${count} notes:${RESET}\n"
+    
+    local found=0
+    
+    # Cross-platform: try GNU find first, fallback to BSD
+    if find "$NOTES_ROOT" -maxdepth 0 -printf "" &>/dev/null 2>&1; then
+        # GNU find
+        while IFS=' ' read -r ts filepath; do
+            [[ -z "$filepath" ]] && continue
+            local rel="${filepath#$NOTES_ROOT/}"
+            echo -e "  ${DIM}${rel}${RESET}"
+            ((found++))
+        done < <(find "$NOTES_ROOT" -name "*.md" -type f -printf "%T@ %p\n" 2>/dev/null | sort -rn | head -n "$count")
+    else
+        # BSD/macOS fallback
+        while IFS=' ' read -r ts filepath; do
+            [[ -z "$filepath" ]] && continue
+            local rel="${filepath#$NOTES_ROOT/}"
+            echo -e "  ${DIM}${rel}${RESET}"
+            ((found++))
+        done < <(find "$NOTES_ROOT" -name "*.md" -type f -exec stat -f "%m %N" {} \; 2>/dev/null | sort -rn | head -n "$count")
+    fi
+    
+    if [[ $found -eq 0 ]]; then
+        echo -e "  ${DIM}No notes found${RESET}"
+    fi
+    echo
+}
+
+# fzf open
+fzf_open() {
+    if ! command -v fzf &>/dev/null; then
+        print_err "fzf not installed"
+        echo -e "  ${DIM}Install: brew install fzf / apt install fzf${RESET}"
+        return 1
+    fi
+    
+    local selected
+    selected=$(find "$NOTES_ROOT" -name "*.md" -type f 2>/dev/null \
+        | sed "s|$NOTES_ROOT/||" \
+        | fzf --preview "head -50 $NOTES_ROOT/{}" \
+              --preview-window=right:60%:wrap \
+              --header="Select note to open" \
+              --height=80% \
+              --reverse)
+    
+    if [[ -n "$selected" ]]; then
+        $EDITOR "${NOTES_ROOT}/${selected}"
+        update_latest_symlink
+    fi
+}
+
+# Search content (FIXED: no subshell variable issue)
+search_notes() {
+    local term="$1"
+    echo -e "${BOLD}Searching:${RESET} ${CYAN}${term}${RESET}\n"
+    
+    local results=()
+    
+    if command -v rg &>/dev/null; then
+        while IFS= read -r f; do
+            results+=("$f")
+        done < <(rg -l --type md "$term" "$NOTES_ROOT" 2>/dev/null)
+    else
+        while IFS= read -r f; do
+            results+=("$f")
+        done < <(grep -rl --include="*.md" "$term" "$NOTES_ROOT" 2>/dev/null)
+    fi
+    
+    if [[ ${#results[@]} -eq 0 ]]; then
+        echo -e "  ${DIM}No matches${RESET}"
+    else
+        for f in "${results[@]}"; do
+            echo -e "  ${GREEN}✓${RESET} ${f#$NOTES_ROOT/}"
+        done
+    fi
+    echo
+}
+
+# Find by filename (FIXED: no subshell variable issue)
+find_notes() {
+    local pattern="$1"
+    echo -e "${BOLD}Finding:${RESET} ${CYAN}*${pattern}*${RESET}\n"
+    
+    local results=()
+    while IFS= read -r f; do
+        results+=("$f")
+    done < <(find "$NOTES_ROOT" -name "*${pattern}*" -type f 2>/dev/null)
+    
+    if [[ ${#results[@]} -eq 0 ]]; then
+        echo -e "  ${DIM}No matches${RESET}"
+    else
+        for f in "${results[@]}"; do
+            echo -e "  ${GREEN}✓${RESET} ${f#$NOTES_ROOT/}"
+        done
+    fi
+    echo
+}
+
+# Tree view
+show_tree() {
+    if command -v tree &>/dev/null; then
+        tree -C --dirsfirst -L 4 "$NOTES_ROOT" 2>/dev/null || echo "Empty"
+    else
+        find "$NOTES_ROOT" -type d 2>/dev/null | head -30
+        echo -e "\n${DIM}Install 'tree' for better output${RESET}"
+    fi
+}
+
+# Open in pager (read-only)
+open_readonly() {
+    local name="${1:-journal-${DATE_FULL}}"
+    [[ "$name" != *.md ]] && name="${name}.md"
+    local filepath="${TODAY_DIR}/${name}"
+    
+    if [[ -f "$filepath" ]]; then
+        ${PAGER:-less} "$filepath"
+    else
+        print_err "Not found: ${filepath}"
+    fi
+}
+
+# Open latest note
+open_latest() {
+    if [[ -L "$LATEST_LINK" && -f "$LATEST_LINK" ]]; then
+        $EDITOR "$LATEST_LINK"
+    else
+        # Try to find most recent
+        update_latest_symlink
+        if [[ -L "$LATEST_LINK" && -f "$LATEST_LINK" ]]; then
+            $EDITOR "$LATEST_LINK"
+        else
+            print_err "No notes found"
+        fi
+    fi
+}
+
+# Show stats
+show_stats() {
+    echo -e "${BOLD}📊 Note Statistics${RESET}\n"
+    
+    local total
+    total=$(find "$NOTES_ROOT" -name "*.md" -type f 2>/dev/null | wc -l | tr -d ' ')
+    
+    local today_count=0
+    [[ -d "$TODAY_DIR" ]] && today_count=$(find "$TODAY_DIR" -name "*.md" -type f 2>/dev/null | wc -l | tr -d ' ')
+    
+    local this_month=0
+    [[ -d "${NOTES_ROOT}/${YEAR}/${MONTH}" ]] && this_month=$(find "${NOTES_ROOT}/${YEAR}/${MONTH}" -name "*.md" -type f 2>/dev/null | wc -l | tr -d ' ')
+    
+    local this_year=0
+    [[ -d "${NOTES_ROOT}/${YEAR}" ]] && this_year=$(find "${NOTES_ROOT}/${YEAR}" -name "*.md" -type f 2>/dev/null | wc -l | tr -d ' ')
+    
+    # Word count (approximate)
+    local words=0
+    if [[ $total -gt 0 ]]; then
+        words=$(find "$NOTES_ROOT" -name "*.md" -type f -exec cat {} + 2>/dev/null | wc -w | tr -d ' ')
+    fi
+    
+    echo -e "  ${DIM}Total notes:${RESET}      ${BOLD}${total}${RESET}"
+    echo -e "  ${DIM}Today:${RESET}            ${today_count}"
+    echo -e "  ${DIM}This month:${RESET}       ${this_month}"
+    echo -e "  ${DIM}This year:${RESET}        ${this_year}"
+    echo -e "  ${DIM}Total words:${RESET}      ~${words}"
+    
+    # Streak calculation
+    echo -e "\n${BOLD}Streak${RESET}"
+    local streak=0
+    
+    for i in $(seq 0 365); do
+        local check_date
+        check_date=$(date_add_days "$DATE_FULL" "-$i") || break
+        [[ -z "$check_date" ]] && break
+        
+        local check_dir
+        check_dir=$(get_date_dir "$check_date")
+        
+        if [[ -d "$check_dir" ]]; then
+            if find "$check_dir" -name "*.md" -type f 2>/dev/null | grep -q .; then
+                streak=$((streak + 1))
+            else
+                break
+            fi
+        else
+            break
+        fi
+    done
+    
+    echo -e "  ${DIM}Current streak:${RESET}   ${GREEN}${streak} days${RESET} 🔥"
+    echo
+}
+
+# Git sync
+git_sync() {
+    if [[ ! -d "${NOTES_ROOT}/.git" ]]; then
+        print_err "Not a git repository. Run: nn --git-init"
+        return 1
+    fi
+    
+    cd "$NOTES_ROOT" || return 1
+    
+    # Add all changes
+    git add -A
+    
+    # Check if there are changes to commit
+    if git diff --cached --quiet; then
+        print_info "No changes to commit"
+    else
+        local msg="notes: sync $(date '+%Y-%m-%d %H:%M')"
+        git commit -m "$msg"
+        print_ok "Committed: ${msg}"
+    fi
+    
+    # Push if remote exists
+    if git remote get-url origin &>/dev/null; then
+        if git push; then
+            print_ok "Pushed to origin"
+        else
+            print_err "Push failed"
+            return 1
+        fi
+    else
+        print_warn "No remote configured. Add with: git remote add origin <url>"
+    fi
+}
+
+# Initialize git repo
+git_init() {
+    ensure_dir "$NOTES_ROOT"
+    cd "$NOTES_ROOT" || return 1
+    
+    if [[ -d ".git" ]]; then
+        print_warn "Already a git repository"
+        return 0
+    fi
+    
+    git init
+    
+    # Create .gitignore
+    cat > .gitignore << 'EOF'
+.DS_Store
+*.swp
+*.swo
+*~
+.latest
+EOF
+    
+    git add -A
+    git commit -m "Initial commit: nn journal"
+    
+    print_ok "Git repository initialized"
+    echo -e "  ${DIM}Add remote: git remote add origin <url>${RESET}"
+}
+
+# Shell completions
+show_completions() {
+    cat << 'BASH_COMPLETIONS'
+# nn bash completions
+# Add to ~/.bashrc: eval "$(nn --completions)"
+
+_nn_completions() {
+    local cur="${COMP_WORDS[COMP_CWORD]}"
+    local prev="${COMP_WORDS[COMP_CWORD-1]}"
+    
+    case "$prev" in
+        -T|--template)
+            COMPREPLY=($(compgen -W "journal incident postmortem oncall runbook standup 1on1 meeting retro" -- "$cur"))
+            return
+            ;;
+        -s|--search|-f|--find)
+            return
+            ;;
+    esac
+    
+    if [[ "$cur" == -* ]]; then
+        COMPREPLY=($(compgen -W "-h --help -? -v --version -T --template -a --append -i --stdin -l --list -r --recent -o --open -s --search -f --find -t --tree -p --path -e --view -m --markdown -y --yesterday -Y --tomorrow --stats --sync --git-init --latest --completions" -- "$cur"))
+    fi
+}
+
+complete -F _nn_completions nn
+BASH_COMPLETIONS
+
+    cat << 'ZSH_COMPLETIONS'
+
+# nn zsh completions  
+# Add to ~/.zshrc: eval "$(nn --completions)"
+
+_nn() {
+    local -a commands templates
+    
+    templates=(
+        'journal:Daily journal'
+        'incident:Incident response'
+        'postmortem:Post-incident review'
+        'oncall:On-call handoff'
+        'runbook:Operational procedure'
+        'standup:Daily standup'
+        '1on1:One-on-one meeting'
+        'meeting:General meeting notes'
+        'retro:Sprint retrospective'
+    )
+    
+    _arguments \
+        '-h[Show help]' \
+        '--help[Show help]' \
+        '-?[Show help]' \
+        '-v[Show version]' \
+        '--version[Show version]' \
+        '-T[Create from template]:template:->templates' \
+        '--template[Create from template]:template:->templates' \
+        '-a[Quick append]:text:' \
+        '--append[Quick append]:text:' \
+        '-i[Pipe stdin to note]:name:' \
+        '--stdin[Pipe stdin to note]:name:' \
+        '-l[List today notes]' \
+        '--list[List today notes]' \
+        '-r[Recent notes]:count:' \
+        '--recent[Recent notes]:count:' \
+        '-o[Open with fzf]' \
+        '--open[Open with fzf]' \
+        '-s[Search content]:term:' \
+        '--search[Search content]:term:' \
+        '-f[Find by filename]:pattern:' \
+        '--find[Find by filename]:pattern:' \
+        '-t[Tree view]' \
+        '--tree[Tree view]' \
+        '-p[Print path]' \
+        '--path[Print path]' \
+        '-e[View in pager]:name:' \
+        '--view[View in pager]:name:' \
+        '-m[Markdown cheatsheet]' \
+        '--markdown[Markdown cheatsheet]' \
+        '-y[Yesterday journal]' \
+        '--yesterday[Yesterday journal]' \
+        '-Y[Tomorrow journal]' \
+        '--tomorrow[Tomorrow journal]' \
+        '--stats[Show statistics]' \
+        '--sync[Git commit and push]' \
+        '--git-init[Initialize git repo]' \
+        '--latest[Open latest note]' \
+        '--completions[Output completions]'
+    
+    case "$state" in
+        templates)
+            _describe 'template' templates
+            ;;
+    esac
+}
+
+compdef _nn nn
+ZSH_COMPLETIONS
+}
+
+# ============================================================================
+# MAIN
+# ============================================================================
+
+main() {
+    # Handle day offset shortcuts: nn +3, nn -2
+    if [[ "${1:-}" =~ ^[+-][0-9]+$ ]]; then
+        navigate_day "$1"
+        return
+    fi
+    
+    case "${1:-}" in
+        -h|--h|-help|--help|-\?|--\?)
+            show_usage
+            ;;
+        -v|--version)
+            echo "nn v${VERSION}"
+            ;;
+        -T|--template)
+            local template="${2:-}"
+            local name="${3:-}"
+            [[ -z "$template" ]] && { echo "Usage: nn -T <template> [name]"; exit 1; }
+            if [[ -n "$name" ]]; then
+                name=$(sanitize_name "$name")
+                create_note "${template}-${name}.md" "$template" "$name"
+            else
+                create_note "${template}-${DATE_FULL}.md" "$template"
+            fi
+            ;;
+        -a|--append)
+            local text="${2:-}"
+            [[ -z "$text" ]] && { echo "Usage: nn -a \"text to append\""; exit 1; }
+            quick_append "$text"
+            ;;
+        -i|--stdin)
+            pipe_to_note "${2:-}"
+            ;;
+        -l|--list)
+            list_today
+            ;;
+        -r|--recent)
+            list_recent "${2:-10}"
+            ;;
+        -o|--open)
+            fzf_open
+            ;;
+        -s|--search)
+            [[ -z "${2:-}" ]] && { echo "Usage: nn -s <search-term>"; exit 1; }
+            search_notes "$2"
+            ;;
+        -f|--find)
+            [[ -z "${2:-}" ]] && { echo "Usage: nn -f <filename-pattern>"; exit 1; }
+            find_notes "$2"
+            ;;
+        -t|--tree)
+            show_tree
+            ;;
+        -p|--path)
+            ensure_dir "$TODAY_DIR"
+            echo "$TODAY_DIR"
+            ;;
+        -e|--view)
+            open_readonly "${2:-}"
+            ;;
+        -m|--markdown)
+            show_markdown_cheatsheet
+            ;;
+        -y|--yesterday)
+            navigate_day -1
+            ;;
+        -Y|--tomorrow)
+            navigate_day 1
+            ;;
+        --stats)
+            show_stats
+            ;;
+        --sync)
+            git_sync
+            ;;
+        --git-init)
+            git_init
+            ;;
+        --latest)
+            open_latest
+            ;;
+        --completions)
+            show_completions
+            ;;
+        "")
+            # No args: daily journal
+            create_note "journal-${DATE_FULL}.md" "journal"
+            ;;
+        -*)
+            echo "nn: unknown option '$1'" >&2
+            echo "" >&2
+            show_brief_usage >&2
+            exit 1
+            ;;
+        *)
+            # Named note with default template
+            local name
+            name=$(sanitize_name "$1")
+            [[ -z "$name" ]] && { echo "Invalid note name"; exit 1; }
+            create_note "${name}.md" "default" "$name"
+            ;;
+    esac
+}
+
+main "$@"
