@@ -3,12 +3,12 @@
 Note-taking CLI. Daily journals, incident docs, meeting notes — from a terminal.
 
 ```bash
-nn                          # Open today's journal
-nn -a "fixed the auth bug"  # Quick append without opening editor
-nn -T incident db-outage    # Incident response template
+nn                              # Open today's journal
+nn -a "fixed the auth bug"      # Quick append without opening editor
+nn -T incident db-outage        # Incident response template
 kubectl get pods | nn -i debug  # Capture command output
-nn -y                       # Yesterday's journal
-nn --sync                   # Git commit & push
+nn -y                           # Yesterday's journal
+nn --sync                       # Git commit & push
 ```
 ## Install
 
