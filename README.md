@@ -10,15 +10,6 @@ kubectl get pods | nn -i debug  # Capture command output
 nn -y                       # Yesterday's journal
 nn --sync                   # Git commit & push
 ```
-
-## Why nn?
-
-- **Fast** — Notes in milliseconds, not minutes
-- **Organized** — Auto-dated folders: `~/journal/2026/01/28/`
-- **Templates** — SRE-focused: incidents, postmortems, runbooks, oncall handoffs
-- **Git-friendly** — Built-in sync, YAML frontmatter for tooling
-- **Zero dependencies** — Pure bash, works everywhere
-
 ## Install
 
 ```bash
