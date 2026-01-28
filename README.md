@@ -1,6 +1,6 @@
 # nn - New Note 📝
 
-A fast, opinionated note-taking CLI. Daily journals, incident docs, meeting notes — all from your terminal.
+Note-taking CLI. Daily journals, incident docs, meeting notes — from a terminal.
 
 ```bash
 nn                          # Open today's journal
