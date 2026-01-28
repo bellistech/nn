@@ -2,23 +2,22 @@
 set -euo pipefail
 
 # nn - New Note v4.0
-# Fast note-taking for SRE/Platform engineers
-# Squaresoft-level polish. Would this be worthy of a FF menu?
+# Fast note-taking for anyone
 
 readonly VERSION="4.0.0"
 readonly NOTES_ROOT="${NOTES_ROOT:-$HOME/journal}"
 readonly EDITOR="${EDITOR:-vim}"
 
-# Colors
-readonly RESET='\033[0m'
-readonly BOLD='\033[1m'
-readonly DIM='\033[2m'
-readonly RED='\033[0;31m'
-readonly GREEN='\033[0;32m'
-readonly YELLOW='\033[0;33m'
-readonly BLUE='\033[0;34m'
-readonly MAGENTA='\033[0;35m'
-readonly CYAN='\033[0;36m'
+# Colors (using $'...' for portable escape sequences)
+readonly RESET=$'\033[0m'
+readonly BOLD=$'\033[1m'
+readonly DIM=$'\033[2m'
+readonly RED=$'\033[0;31m'
+readonly GREEN=$'\033[0;32m'
+readonly YELLOW=$'\033[0;33m'
+readonly BLUE=$'\033[0;34m'
+readonly MAGENTA=$'\033[0;35m'
+readonly CYAN=$'\033[0;36m'
 
 # Date components (computed once at startup)
 readonly YEAR=$(date '+%Y')
@@ -1301,3 +1300,4 @@ main() {
 }
 
 main "$@"
+
