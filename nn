@@ -2,8 +2,7 @@
 set -euo pipefail
 
 # nn - New Note v4.0.1
-# Fast note-taking for SRE/Platform engineers
-# Squaresoft-level polish. Would this be worthy of a FF menu?
+# Fast note-taking for anyone.
 
 readonly VERSION="4.0.1"
 readonly NOTES_ROOT="${NOTES_ROOT:-$HOME/journal}"
