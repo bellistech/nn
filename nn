@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# nn - New Note v4.0
-# Fast note-taking for anyone
+# nn - New Note v4.0.1
+# Fast note-taking for SRE/Platform engineers
+# Squaresoft-level polish. Would this be worthy of a FF menu?
 
-readonly VERSION="4.0.0"
+readonly VERSION="4.0.1"
 readonly NOTES_ROOT="${NOTES_ROOT:-$HOME/journal}"
 readonly EDITOR="${EDITOR:-vim}"
 
@@ -264,8 +265,20 @@ _Created: ${TIME_FULL}_
 
 ---
 
-## Energy/Mood
+## Energy/Mood/Mind/Body/Soul/et cetera and other things
 <!-- 1-10, quick check-in -->
+
+
+Mood/Emotion (0-10): How are you feeling today (0=worst, 10=best)?
+
+
+Physical Health (0-10): How is your sleep/energy level?
+
+
+Recent Social Engagement (0-10): How present are you in the world?
+
+
+---
 
 
 ## What's on my mind
@@ -278,6 +291,15 @@ _Created: ${TIME_FULL}_
 
 
 ## Tomorrow's focus
+
+
+## TODO Future
+
+
+
+
+
+
 
 
 EOF
@@ -614,8 +636,8 @@ Usage: nn [OPTIONS] [NAME]
 
 Quick start:
   nn                    Open today's journal
-  nn <name>             Create named note
-  nn -a "text"          Quick append
+  nn -n [name]          Create quick note (date-stamped)
+  nn -a "text"          Quick append to journal
   nn -T <template>      Use template
 
 Common options:
@@ -634,7 +656,7 @@ ${BOLD}nn${RESET} - New Note v${VERSION}
 
 ${BOLD}USAGE${RESET}
   nn                          Create/open today's journal
-  nn <name>                   Create named note
+  nn -n [name]                  Quick note (date-stamped)
   nn -T <template> [name]     Create from template
   nn -a "text"                Quick append to today's journal
   nn -i [name]                Pipe stdin to note
@@ -679,7 +701,7 @@ ${BOLD}UTILITY${RESET}
 
 ${BOLD}EXAMPLES${RESET}
   nn                          # journal-${DATE_FULL}.md
-  nn standup                  # standup.md
+  nn -n standup              # standup-2026-01-28.md
   nn -T incident prod-down    # incident-prod-down.md
   nn -a "fixed nginx bug"     # Append to journal
   kubectl get pods | nn -i k8s-debug
@@ -1113,7 +1135,7 @@ _nn_completions() {
     esac
     
     if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "-h --help -? -v --version -T --template -a --append -i --stdin -l --list -r --recent -o --open -s --search -f --find -t --tree -p --path -e --view -m --markdown -y --yesterday -Y --tomorrow --stats --sync --git-init --latest --completions" -- "$cur"))
+        COMPREPLY=($(compgen -W "-h --help -? -n --new -v --version -T --template -a --append -i --stdin -l --list -r --recent -o --open -s --search -f --find -t --tree -p --path -e --view -m --markdown -y --yesterday -Y --tomorrow --stats --sync --git-init --latest --completions" -- "$cur"))
     fi
 }
 
@@ -1144,6 +1166,8 @@ _nn() {
         '-h[Show help]' \
         '--help[Show help]' \
         '-?[Show help]' \
+        '-n[Create quick note]' \
+        '--new[Create quick note]' \
         '-v[Show version]' \
         '--version[Show version]' \
         '-T[Create from template]:template:->templates' \
@@ -1279,6 +1303,13 @@ main() {
         --completions)
             show_completions
             ;;
+        -n|--new)
+            # Quick note with date stamp
+            local name="${2:-note}"
+            name=$(sanitize_name "$name")
+            [[ -z "$name" ]] && name="note"
+            create_note "${name}-${DATE_FULL}.md" "default" "$name"
+            ;;
         "")
             # No args: daily journal
             create_note "journal-${DATE_FULL}.md" "journal"
@@ -1290,14 +1321,13 @@ main() {
             exit 1
             ;;
         *)
-            # Named note with default template
-            local name
-            name=$(sanitize_name "$1")
-            [[ -z "$name" ]] && { echo "Invalid note name"; exit 1; }
-            create_note "${name}.md" "default" "$name"
+            # Unknown positional arg - show usage instead of creating junk file
+            echo "nn: unknown command '$1'" >&2
+            echo "" >&2
+            show_brief_usage >&2
+            exit 1
             ;;
     esac
 }
 
 main "$@"
-
