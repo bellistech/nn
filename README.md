@@ -203,7 +203,7 @@ docker logs app 2>&1 | nn -i docker-logs
 
 ## Tips
 
-**Sync to mobile**: Point `NOTES_ROOT` at a Syncthing/Dropbox folder
+**Sync to mobile**: Point `NOTES_ROOT` at a Git/Github/LTS/Syncing/GitDropbox folder
 
 **Search with context**: `nn -s "error" && rg -C3 "error" ~/journal`
 
